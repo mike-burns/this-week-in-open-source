@@ -16,7 +16,7 @@ import qualified Data.ByteString as BS
 import Data.Maybe
 
 import Control.Applicative
-import Control.Monad (mzero, forM, liftM)
+import Control.Monad (mzero, forM, liftM, when)
 
 import qualified Data.Text as T
 
@@ -24,6 +24,13 @@ import Data.Typeable
 import Data.Data
 
 import System.Process
+
+import Data.Time.Clock
+import System.Locale
+import Data.Time.Format
+
+newtype GithubTime = GithubTime { fromGithubTime :: UTCTime }
+  deriving (Show, Data, Typeable)
 
 data Author = Author {
    authorName :: String
@@ -36,6 +43,7 @@ data Commit = Commit {
   ,commitMessage :: String
   ,commitShortSha  :: String
   ,commitAuthor :: Author
+  ,commitDate :: GithubTime
   } deriving (Show, Typeable, Data)
 
 data Commits = Commits {
@@ -44,10 +52,11 @@ data Commits = Commits {
 
 main = do
   args <- getArgs
+  startingTime <- oneWeekAgo
   forM_ args $ \repoName -> do
-    commits <- getCommits repoName
-    putStrLn $ repoNameToHtml repoName
+    commits <- getCommits startingTime repoName
     let groupedCommits = groupByAuthor $ commitsForRepo repoName commits
+    when (not $ null groupedCommits) (putStrLn $ repoNameToHtml repoName)
     forM_ groupedCommits $ \(author,commits) ->  do
       putStrLn ""
       putStrLn $ authorToHtml author
@@ -84,20 +93,21 @@ commitsForRepo repoName commits =
 
 --
 
-getCommits :: String -> IO [Commit]
-getCommits repoName = do
+getCommits :: UTCTime -> String -> IO [Commit]
+getCommits startingTime repoName = do
   jsonString <- openUrl $ githubUrlFor repoName
   let parsed = parse (fromJSON <$> json) jsonString
   case parsed of
        Data.Attoparsec.Done _ jsonResult -> do
          case jsonResult of
               (Success s) -> handleCommits $ commitsCommits s
+              x -> print x >> return []
        x -> do
          print x
          return []
   where
     handleCommits commits =
-      forM commits $ \commit -> do
+      forM (commitsAfter startingTime commits) $ \commit -> do
         shortSha <- getShortSha $ commitShortSha commit
         return $ processCommitFor repoName shortSha commit
 
@@ -109,7 +119,16 @@ processCommitFor repoName shortSha commit =
     ,commitMessage = commitMessage commit
     ,commitShortSha = shortSha
     ,commitAuthor = commitAuthor commit
+    ,commitDate = commitDate commit
     }
+
+commitsAfter :: UTCTime -> [Commit] -> [Commit]
+commitsAfter startingTime commits =
+  filter (\commit -> fromGithubTime (commitDate commit) > startingTime)
+         commits
+
+oneWeekAgo :: IO UTCTime
+oneWeekAgo = addUTCTime (-7 * 60 * 60 * 24) <$> getCurrentTime
 
 instance FromJSON Author where
   parseJSON (Object o) = Author <$> o .: "name" <*> o .: "login"
@@ -122,11 +141,19 @@ instance FromJSON Commit where
            <*> o .: "message"
            <*> o .: "id"
            <*> o .: "author"
+           <*> o .: "committed_date"
   parseJSON _          = mzero
 
 instance FromJSON Commits where
   parseJSON (Object o) = Commits <$> o .: "commits"
   parseJSON _          = mzero
+
+instance FromJSON GithubTime where
+  parseJSON (String t) =
+    case parseTime defaultTimeLocale "%FT%T%Z" (T.unpack t) of
+         Just d -> pure $ GithubTime d
+         _      -> fail "could not parse Github datetime"
+  parseJSON v   = mzero
 
 githubUrlFor :: String -> String
 githubUrlFor repoName =

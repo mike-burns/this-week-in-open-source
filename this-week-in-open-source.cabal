@@ -57,7 +57,9 @@ Executable this-week-in-open-source
                        attoparsec,
                        text,
                        vector,
-                       process
+                       process,
+                       time,
+                       old-locale
   
   -- Modules not exported by this package.
   -- Other-modules:       
