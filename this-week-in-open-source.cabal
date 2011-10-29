@@ -48,7 +48,16 @@ Executable this-week-in-open-source
   Main-is:             Main.hs
   
   -- Packages needed in order to build this package.
-  Build-depends:       base, containers
+  Build-depends:       base,
+                       containers,
+                       aeson,
+                       network,
+                       HTTP,
+                       bytestring,
+                       attoparsec,
+                       text,
+                       vector,
+                       process
   
   -- Modules not exported by this package.
   -- Other-modules:       
