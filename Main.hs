@@ -29,6 +29,8 @@ import Data.Time.Clock
 import System.Locale
 import Data.Time.Format
 
+import Network.Curl.Download
+
 newtype GithubTime = GithubTime { fromGithubTime :: UTCTime }
   deriving (Show, Data, Typeable)
 
@@ -95,7 +97,7 @@ commitsForRepo repoName commits =
 
 getCommits :: UTCTime -> String -> IO [Commit]
 getCommits startingTime repoName = do
-  jsonString <- openUrl $ githubUrlFor repoName
+  (Right jsonString) <- openURI $ githubUrlFor repoName
   let parsed = parse (fromJSON <$> json) jsonString
   case parsed of
        Data.Attoparsec.Done _ jsonResult -> do
@@ -158,10 +160,6 @@ instance FromJSON GithubTime where
 githubUrlFor :: String -> String
 githubUrlFor repoName =
   "http://github.com/api/v2/json/commits/list/thoughtbot/" ++ repoName ++ "/master"
-
-openUrl :: String -> IO BS.ByteString
-openUrl url =
-  getResponseBody =<< simpleHTTP (mkRequest GET (fromJust $ parseURI url))
 
 --
 

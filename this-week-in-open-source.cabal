@@ -59,7 +59,8 @@ Executable this-week-in-open-source
                        vector,
                        process,
                        time,
-                       old-locale
+                       old-locale,
+                       download-curl
   
   -- Modules not exported by this package.
   -- Other-modules:       
