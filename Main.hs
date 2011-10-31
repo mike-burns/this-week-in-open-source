@@ -130,7 +130,8 @@ commitsAfter startingTime commits =
          commits
 
 oneWeekAgo :: IO UTCTime
-oneWeekAgo = addUTCTime (-7 * 60 * 60 * 24) <$> getCurrentTime
+oneWeekAgo = addUTCTime oneWeek <$> getCurrentTime
+oneWeek = (-7 * 60 * 60 * 24)
 
 instance FromJSON Author where
   parseJSON (Object o) = Author <$> o .: "name" <*> o .: "login"
