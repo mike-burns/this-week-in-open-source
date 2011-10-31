@@ -1,168 +1,81 @@
-{-# LANGUAGE DeriveDataTypeable, OverloadedStrings #-}
-
 module Main where
 
 import System.Environment
 import Data.Foldable
 import Data.Map (Map)
 import qualified Data.Map as Map
-
-import Network.HTTP
-import Network.URI
-
-import Data.Aeson
-import Data.Attoparsec
-import qualified Data.ByteString as BS
-import Data.Maybe
-
 import Control.Applicative
 import Control.Monad (mzero, forM, liftM, when)
-
-import qualified Data.Text as T
-
-import Data.Typeable
-import Data.Data
-
 import System.Process
-
 import Data.Time.Clock
-import System.Locale
-import Data.Time.Format
-
-import Network.Curl.Download
-
-newtype GithubTime = GithubTime { fromGithubTime :: UTCTime }
-  deriving (Show, Data, Typeable)
-
-data Author = Author {
-   authorName :: String
-  ,authorLogin :: String
-  } deriving (Show, Ord, Eq, Typeable, Data)
-
-data Commit = Commit {
-   commitRepoName :: String
-  ,commitUrl :: String
-  ,commitMessage :: String
-  ,commitShortSha  :: String
-  ,commitAuthor :: Author
-  ,commitDate :: GithubTime
-  } deriving (Show, Typeable, Data)
-
-data Commits = Commits {
-  commitsCommits :: [Commit]
-  } deriving (Show, Typeable, Data)
+import qualified Github.Repos.Commits as Github
 
 main = do
   args <- getArgs
   startingTime <- oneWeekAgo
   forM_ args $ \repoName -> do
-    commits <- getCommits startingTime repoName
-    let groupedCommits = groupByAuthor $ commitsForRepo repoName commits
-    when (not $ null groupedCommits) (putStrLn $ repoNameToHtml repoName)
-    forM_ groupedCommits $ \(author,commits) ->  do
-      putStrLn ""
-      putStrLn $ authorToHtml author
-      forM_ commits $ putStrLn . commitToHtml
+    possibleCommits <- Github.commitsFor "thoughtbot" repoName
+    case possibleCommits of
+      (Left err) -> print err
+      (Right allCommits) -> do
+        let commits = commitsAfter startingTime allCommits
+            groupedCommits = groupByAuthor commits
+        when (not $ null groupedCommits) (putStrLn $ repoNameToHtml repoName)
+        forM_ groupedCommits $ \(author,commits) ->  do
+          putStrLn ""
+          putStrLn $ userToHtml $ head commits -- can only get here if a commit exists for this author
+          forM_ commits $ \commit -> do
+            shortSha <- getShortSha $ Github.commitSha commit
+            putStrLn $ commitToHtml commit shortSha
 
-authorToHtml :: Author -> String
-authorToHtml author =
-  "  " ++ (authorName author) ++ " (<a href=\"http://github.com/" ++
-    (authorLogin author) ++ "\">" ++ (authorLogin author) ++ "</a>)"
+userToHtml :: Github.Commit -> String
+userToHtml commit =
+  "  " ++ (Github.gitUserName gitAuthor) ++
+    " (<a href=\"http://github.com/" ++
+    (Github.githubUserLogin githubAuthor) ++ "\">" ++
+    (Github.githubUserLogin githubAuthor) ++ "</a>)"
+  where
+    (Just githubAuthor) = Github.commitAuthor commit
+    gitAuthor = Github.gitCommitAuthor $ Github.commitGitCommit commit
 
-commitToHtml :: Commit -> String
-commitToHtml commit =
-  "    <a href=\"" ++ (commitUrl commit) ++ "\" title=\"" ++ (htmlEscape $ commitMessage commit) ++ "\">" ++ (commitShortSha commit) ++ "</a>"
+commitToHtml :: Github.Commit -> String -> String
+commitToHtml commit shortSha =
+  "    <a href=\"" ++ commitUrl ++ "\" title=\"" ++ (htmlEscape $ Github.gitCommitMessage $ Github.commitGitCommit commit) ++ "\">" ++ shortSha ++ "</a>"
   where
   htmlEscape "" = ""
   htmlEscape (s:ss)
     | s == '"' = "&quot;" ++ htmlEscape ss
     | otherwise = s : htmlEscape ss
+  commitUrl =
+    "https://github.com/thoughtbot/paperclip/commit/" ++ (Github.commitSha commit)
 
 repoNameToHtml :: String -> String
 repoNameToHtml repoName =
   "<h2>" ++ repoName ++ "</h2>"
 
-groupByAuthor :: [Commit] -> [(Author, [Commit])]
+groupByAuthor :: [Github.Commit] -> [(Github.GithubUser, [Github.Commit])]
 groupByAuthor commits = Map.assocs $ groupByAuthor' commits Map.empty
   where
   groupByAuthor' [] hash = hash
   groupByAuthor' (x:xs) hash =
-    groupByAuthor' xs $ Map.insertWith (++) (commitAuthor x) [x] hash
+    groupByAuthor' xs $ inserter hash
+    where
+      inserter =
+        case Github.commitAuthor x of
+          (Just author) -> Map.insertWith (++) author [x]
+          Nothing       -> id
 
-commitsForRepo :: String -> [Commit] -> [Commit]
-commitsForRepo repoName commits =
-  filter (\commit -> repoName == commitRepoName commit) commits
-
---
-
-getCommits :: UTCTime -> String -> IO [Commit]
-getCommits startingTime repoName = do
-  (Right jsonString) <- openURI $ githubUrlFor repoName
-  let parsed = parse (fromJSON <$> json) jsonString
-  case parsed of
-       Data.Attoparsec.Done _ jsonResult -> do
-         case jsonResult of
-              (Success s) -> handleCommits $ commitsCommits s
-              x -> print x >> return []
-       x -> do
-         print x
-         return []
-  where
-    handleCommits commits =
-      forM (commitsAfter startingTime commits) $ \commit -> do
-        shortSha <- getShortSha $ commitShortSha commit
-        return $ processCommitFor repoName shortSha commit
-
-processCommitFor :: String -> String -> Commit -> Commit
-processCommitFor repoName shortSha commit =
-  Commit {
-     commitRepoName = repoName
-    ,commitUrl = "http://github.com" ++ commitUrl commit
-    ,commitMessage = commitMessage commit
-    ,commitShortSha = shortSha
-    ,commitAuthor = commitAuthor commit
-    ,commitDate = commitDate commit
-    }
-
-commitsAfter :: UTCTime -> [Commit] -> [Commit]
+commitsAfter :: UTCTime -> [Github.Commit] -> [Github.Commit]
 commitsAfter startingTime commits =
-  filter (\commit -> fromGithubTime (commitDate commit) > startingTime)
+  filter (\commit -> (commitDate commit) > startingTime)
          commits
+  where
+  commitDate commit =
+    Github.fromGithubDate $ Github.gitUserDate $ Github.gitCommitCommitter $ Github.commitGitCommit commit
 
 oneWeekAgo :: IO UTCTime
 oneWeekAgo = addUTCTime oneWeek <$> getCurrentTime
 oneWeek = (-7 * 60 * 60 * 24)
-
-instance FromJSON Author where
-  parseJSON (Object o) = Author <$> o .: "name" <*> o .: "login"
-  parseJSON _          = mzero
-
-instance FromJSON Commit where
-  parseJSON (Object o) =
-    Commit "-"
-           <$> o .: "url"
-           <*> o .: "message"
-           <*> o .: "id"
-           <*> o .: "author"
-           <*> o .: "committed_date"
-  parseJSON _          = mzero
-
-instance FromJSON Commits where
-  parseJSON (Object o) = Commits <$> o .: "commits"
-  parseJSON _          = mzero
-
-instance FromJSON GithubTime where
-  parseJSON (String t) =
-    case parseTime defaultTimeLocale "%FT%T%Z" (T.unpack t) of
-         Just d -> pure $ GithubTime d
-         _      -> fail "could not parse Github datetime"
-  parseJSON v   = mzero
-
-githubUrlFor :: String -> String
-githubUrlFor repoName =
-  "http://github.com/api/v2/json/commits/list/thoughtbot/" ++ repoName ++ "/master"
-
---
 
 getShortSha :: String -> IO String
 getShortSha sha =
