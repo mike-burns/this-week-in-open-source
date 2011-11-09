@@ -9,10 +9,11 @@ import Control.Monad (mzero, forM, liftM, when)
 import System.Process
 import Data.Time.Clock
 import qualified Github.Repos.Commits as Github
+import Data.Time.Convenience
 
 main = do
   args <- getArgs
-  startingTime <- oneWeekAgo
+  startingTime <- timeFor 1 Week Ago
   forM_ args $ \repoName -> do
     possibleCommits <- Github.commitsFor "thoughtbot" repoName
     case possibleCommits of
@@ -72,10 +73,6 @@ commitsAfter startingTime commits =
   where
   commitDate commit =
     Github.fromGithubDate $ Github.gitUserDate $ Github.gitCommitCommitter $ Github.commitGitCommit commit
-
-oneWeekAgo :: IO UTCTime
-oneWeekAgo = addUTCTime oneWeek <$> getCurrentTime
-oneWeek = (-7 * 60 * 60 * 24)
 
 getShortSha :: String -> IO String
 getShortSha sha =

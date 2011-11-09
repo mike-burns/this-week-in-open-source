@@ -53,7 +53,8 @@ Executable this-week-in-open-source
                        process,
                        time,
                        old-locale,
-                       github
+                       github,
+                       timing-convenience
   
   -- Modules not exported by this package.
   -- Other-modules:       
