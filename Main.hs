@@ -10,6 +10,7 @@ import System.Process
 import Data.Time.Clock
 import qualified Github.Repos.Commits as Github
 import Data.Time.Convenience
+import Data.List (intercalate)
 
 main = do
   args <- getArgs
@@ -21,7 +22,9 @@ main = do
       (Right allCommits) -> do
         let commits = commitsAfter startingTime allCommits
             groupedCommits = groupByAuthor commits
-        when (not $ null groupedCommits) (putStrLn $ repoNameToHtml repoName)
+        when (not $ null groupedCommits) $ do
+             putStrLn $ repoNameToHtml repoName
+             putStrLn $ aggregatedGravatars $ map fst groupedCommits
         forM_ groupedCommits $ \(author,commits) ->  do
           putStrLn ""
           putStrLn $ userToHtml $ head commits -- can only get here if a commit exists for this author
@@ -29,15 +32,28 @@ main = do
             shortSha <- getShortSha $ Github.commitSha commit
             putStrLn $ commitToHtml commit shortSha
 
+aggregatedGravatars :: [Github.GithubUser] -> String
+aggregatedGravatars authors =
+  intercalate "\n" $ map avatarizedHtml authors
+
+avatarizedHtml user = userLink login avatarLink
+  where login = Github.githubUserLogin user
+        avatarUrl = Github.githubUserAvatarUrl user
+        avatarLink = "<img src=\"" ++ avatarUrl ++ "&s=140\" alt=\"" ++
+          login ++ "'s avatar\">"
+
 userToHtml :: Github.Commit -> String
 userToHtml commit =
   "  " ++ (Github.gitUserName gitAuthor) ++
-    " (<a href=\"http://github.com/" ++
-    (Github.githubUserLogin githubAuthor) ++ "\">" ++
-    (Github.githubUserLogin githubAuthor) ++ "</a>)"
+    " (" ++ (userLink login login) ++ ")"
   where
     (Just githubAuthor) = Github.commitAuthor commit
     gitAuthor = Github.gitCommitAuthor $ Github.commitGitCommit commit
+    login = Github.githubUserLogin githubAuthor
+
+userLink login content =
+  "<a href=\"http://github.com/" ++
+    login ++ "\" title=\"" ++ login ++ "\">" ++ content ++ "</a>"
 
 commitToHtml :: Github.Commit -> String -> String
 commitToHtml commit shortSha =
